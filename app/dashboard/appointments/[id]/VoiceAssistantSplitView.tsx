@@ -3,7 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveTranscriptionAndStructuredNote } from '@/app/actions/chart';
+import { saveCdiChartInfo } from '@/app/actions/cdi';
 import StructuredNoteForm from './StructuredNoteForm';
+import CdiReviewModal from './CdiReviewModal';
+import CdiDiffEditor from './CdiDiffEditor';
 import { StructuredNote, emptyStructuredNote } from './types';
 
 /**
@@ -21,12 +24,39 @@ interface SerializedChartInfo {
   plan: string | null;
 }
 
+/**
+ * Serialized CDI chart info from database
+ */
+interface SerializedCdiChartInfo extends SerializedChartInfo {
+  cdiStatus: string | null;
+  cdiReviewedAt: string | null;
+  cdiNotes: string | null;
+  assessment: string | null;
+  clinicalImpression: string | null;
+}
+
 interface VoiceAssistantSplitViewProps {
   appointmentId: number;
   initialChartInfo: SerializedChartInfo | null;
+  initialCdiChartInfo: SerializedCdiChartInfo | null;
 }
 
 type ViewState = 'idle' | 'recording' | 'processing' | 'filling' | 'review';
+type CdiViewState = 'none' | 'processing' | 'results';
+
+interface CdiChartData {
+  chiefComplient?: string | null;
+  historyOfIllness?: string | null;
+  history?: string | null;
+  ros?: string | null;
+  physicalExam?: string | null;
+  vitalSigns?: string | null;
+  diagnosis?: string | null;
+  plan?: string | null;
+  assessment?: string | null;
+  clinicalImpression?: string | null;
+  cdiNotes?: string;
+}
 
 /** Field animation order for the magical auto-fill effect */
 const FIELD_ORDER = [
@@ -101,17 +131,25 @@ function parseChartInfoToStructuredNote(chartInfo: SerializedChartInfo): Structu
 /**
  * Split view component for clinical documentation
  * Shows only form if transcription exists, otherwise shows split view
+ * Prioritizes CDI chart info over regular chart info when both exist
  */
 export default function VoiceAssistantSplitView({ 
   appointmentId,
-  initialChartInfo
+  initialChartInfo,
+  initialCdiChartInfo
 }: VoiceAssistantSplitViewProps) {
+  // Determine if we have CDI data (prioritize CDI over regular chart info)
+  const hasCdiData = Boolean(initialCdiChartInfo);
+  
+  // Use CDI data if available, otherwise use regular chart info
+  const activeChartInfo = hasCdiData ? initialCdiChartInfo : initialChartInfo;
+  
   // Determine if we have existing transcription
-  const hasExistingTranscription = Boolean(initialChartInfo?.rawTranscription);
+  const hasExistingTranscription = Boolean(activeChartInfo?.rawTranscription);
   
   // Initialize structured note from existing data or empty
-  const initialNote = initialChartInfo && hasExistingTranscription
-    ? parseChartInfoToStructuredNote(initialChartInfo)
+  const initialNote = activeChartInfo && hasExistingTranscription
+    ? parseChartInfoToStructuredNote(activeChartInfo)
     : emptyStructuredNote;
 
   const [structuredNote, setStructuredNote] = useState<StructuredNote>(initialNote);
@@ -126,8 +164,121 @@ export default function VoiceAssistantSplitView({
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [animatingField, setAnimatingField] = useState<string | null>(null);
   const [fillingProgress, setFillingProgress] = useState(0);
+  const [showCdiModal, setShowCdiModal] = useState(false);
+  const [cdiViewState, setCdiViewState] = useState<CdiViewState>('none');
+  const [cdiOriginalData, setCdiOriginalData] = useState<CdiChartData | null>(null);
+  const [cdiImprovedData, setCdiImprovedData] = useState<CdiChartData | null>(null);
+  const [cdiError, setCdiError] = useState<string | null>(null);
+  const [cdiSaving, setCdiSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
+
+  // Format CDI review date for display
+  const cdiReviewedDate = initialCdiChartInfo?.cdiReviewedAt 
+    ? new Date(initialCdiChartInfo.cdiReviewedAt).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : null;
+
+  // Prepare chart data for CDI review (use original chart info, not CDI)
+  const chartDataForCdi: CdiChartData = {
+    chiefComplient: initialChartInfo?.chiefComplient,
+    historyOfIllness: initialChartInfo?.historyOfIllness,
+    history: initialChartInfo?.history,
+    ros: initialChartInfo?.ros,
+    physicalExam: initialChartInfo?.physicalExam,
+    vitalSigns: initialChartInfo?.vitalSigns,
+    diagnosis: initialChartInfo?.diagnosis,
+    plan: initialChartInfo?.plan,
+  };
+
+  /** Handles CDI option selection from modal */
+  const handleCdiOptionSelect = async (option: 1 | 2) => {
+    if (option === 1) {
+      setCdiViewState('processing');
+      setCdiError(null);
+      
+      try {
+        const response = await fetch('/api/cdi/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chartData: chartDataForCdi }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to process CDI review');
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || 'CDI processing failed');
+        }
+
+        setCdiOriginalData(result.originalData);
+        setCdiImprovedData(result.data);
+        setCdiViewState('results');
+      } catch (err) {
+        setCdiError(err instanceof Error ? err.message : 'An error occurred');
+        setCdiViewState('none');
+      }
+    }
+    // Option 2 is coming soon
+  };
+
+  /** Handles saving CDI data and going back to normal view */
+  const handleCdiProceed = async () => {
+    if (!cdiImprovedData) return;
+
+    setCdiSaving(true);
+    try {
+      // Convert null values to undefined for the server action
+      const cleanedCdiData = {
+        chiefComplient: cdiImprovedData.chiefComplient || undefined,
+        historyOfIllness: cdiImprovedData.historyOfIllness || undefined,
+        history: cdiImprovedData.history || undefined,
+        ros: cdiImprovedData.ros || undefined,
+        physicalExam: cdiImprovedData.physicalExam || undefined,
+        vitalSigns: cdiImprovedData.vitalSigns || undefined,
+        diagnosis: cdiImprovedData.diagnosis || undefined,
+        plan: cdiImprovedData.plan || undefined,
+        assessment: cdiImprovedData.assessment || undefined,
+        clinicalImpression: cdiImprovedData.clinicalImpression || undefined,
+        cdiNotes: cdiImprovedData.cdiNotes || undefined,
+      };
+      
+      const result = await saveCdiChartInfo(
+        appointmentId,
+        cleanedCdiData,
+        initialChartInfo?.rawTranscription || undefined
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save');
+      }
+
+      // Reset CDI view and go back to normal
+      setCdiViewState('none');
+      setCdiOriginalData(null);
+      setCdiImprovedData(null);
+    } catch (err) {
+      setCdiError(err instanceof Error ? err.message : 'Failed to save CDI data');
+    } finally {
+      setCdiSaving(false);
+    }
+  };
+
+  /** Cancels CDI review and goes back to normal view */
+  const handleCdiCancel = () => {
+    setCdiViewState('none');
+    setCdiOriginalData(null);
+    setCdiImprovedData(null);
+    setCdiError(null);
+  };
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || 
@@ -340,61 +491,227 @@ export default function VoiceAssistantSplitView({
   if (!showVoicePanel) {
     return (
       <div className="flex h-full w-full overflow-hidden bg-white rounded-3xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.08)] border border-gray-100">
-        <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-white relative">
-          <div className="px-6 py-4 border-b border-gray-100/80 flex justify-between items-center">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">Clinical Documentation</h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {initialChartInfo?.rawTranscription ? 'Transcription on file' : 'Structured Note Fields'}
+        {/* CDI Processing Overlay */}
+        <AnimatePresence>
+          {cdiViewState === 'processing' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-20 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center rounded-3xl"
+            >
+              <div className="w-20 h-20 mb-6 relative">
+                <motion.div 
+                  className="absolute inset-0 rounded-full"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  style={{ 
+                    background: 'conic-gradient(from 0deg, #6366f1, #a855f7, #ec4899, #6366f1)',
+                    maskImage: 'radial-gradient(transparent 60%, black 60%)',
+                    WebkitMaskImage: 'radial-gradient(transparent 60%, black 60%)'
+                  }}
+                />
+                <div className="absolute inset-3 rounded-full bg-white flex items-center justify-center">
+                  <motion.span
+                    animate={{ scale: [1, 1.1, 1] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="text-2xl"
+                  >
+                    🔍
+                  </motion.span>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Analyzing Documentation</h3>
+              <p className="text-gray-400 text-sm text-center max-w-sm">
+                AI is reviewing your clinical documentation and applying CDI best practices...
               </p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={() => setShowVoicePanel(true)}
-                className="flex items-center space-x-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-2xl text-sm font-semibold hover:bg-indigo-100 transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 013 3v10a3 3 0 01-6 0V4a3 3 0 013-3z" />
-                </svg>
-                <span>New Recording</span>
-              </button>
-              <button 
-                className="px-5 py-2.5 bg-indigo-600 text-white rounded-2xl text-sm font-semibold 
-                  shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:shadow-xl transition-all"
-              >
-                Finalize Note
-              </button>
-            </div>
-          </div>
-          
-          {/* Show existing transcription preview */}
-          {initialChartInfo?.rawTranscription && (
-            <div className="mx-6 mt-4 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
-              <div className="flex items-start space-x-3">
-                <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* CDI Results View */}
+        {cdiViewState === 'results' && cdiOriginalData && cdiImprovedData ? (
+          <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-white relative">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-100/80 flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-blue-800">Original Transcription</p>
-                  <p className="text-xs text-blue-600 mt-1 line-clamp-2">
-                    {initialChartInfo.rawTranscription}
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">CDI Review Results</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Edit the improved fields below, then proceed to save</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleCdiCancel}
+                  className="px-4 py-2.5 text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleCdiProceed}
+                  disabled={cdiSaving}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl text-sm font-semibold 
+                    shadow-lg shadow-indigo-100 hover:shadow-xl transition-all disabled:opacity-70"
+                >
+                  {cdiSaving ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Proceed & Save</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Error message */}
+            {cdiError && (
+              <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                {cdiError}
+              </div>
+            )}
+            
+            {/* CDI Diff Editor */}
+            <div className="flex-1 overflow-hidden">
+              <CdiDiffEditor
+                originalData={cdiOriginalData}
+                cdiData={cdiImprovedData}
+                onCdiDataChange={setCdiImprovedData}
+              />
+            </div>
+          </div>
+        ) : (
+          /* Normal Form View */
+          <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-white relative">
+            <div className="px-6 py-4 border-b border-gray-100/80 flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                {hasCdiData && (
+                  <div className="flex items-center space-x-2 px-3 py-1.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl">
+                    <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-xs font-bold text-emerald-700">CDI Reviewed</span>
+                  </div>
+                )}
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">
+                    {hasCdiData ? 'CDI-Compliant Documentation' : 'Clinical Documentation'}
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {hasCdiData && cdiReviewedDate
+                      ? `Reviewed on ${cdiReviewedDate}`
+                      : activeChartInfo?.rawTranscription 
+                        ? 'Transcription on file' 
+                        : 'Structured Note Fields'}
                   </p>
                 </div>
               </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setShowVoicePanel(true)}
+                  className="flex items-center space-x-2 px-4 py-2.5 bg-gray-100 text-gray-600 rounded-2xl text-sm font-semibold hover:bg-gray-200 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 013 3v10a3 3 0 01-6 0V4a3 3 0 013-3z" />
+                  </svg>
+                  <span>New Recording</span>
+                </button>
+                <button 
+                  onClick={() => setShowCdiModal(true)}
+                  className={`flex items-center space-x-2 px-5 py-2.5 rounded-2xl text-sm font-semibold shadow-lg transition-all ${
+                    hasCdiData 
+                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-amber-100 hover:shadow-xl'
+                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-100 hover:shadow-xl'
+                  }`}
+                >
+                  {hasCdiData ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Regenerate CDI</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>CDI Review</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          )}
-          
-          <div ref={formScrollRef} className="flex-1 overflow-y-auto relative scroll-smooth">
-            <StructuredNoteForm
-              note={structuredNote}
-              onChange={setStructuredNote}
-              disabled={false}
-              animatingField={null}
-            />
+
+            {/* CDI Notes Banner */}
+            {hasCdiData && initialCdiChartInfo?.cdiNotes && (
+              <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-emerald-800">CDI Review Notes</p>
+                    <p className="text-xs text-emerald-600 mt-1">
+                      {initialCdiChartInfo.cdiNotes}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Show existing transcription preview */}
+            {activeChartInfo?.rawTranscription && (
+              <div className="mx-6 mt-4 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-blue-800">Original Transcription</p>
+                    <p className="text-xs text-blue-600 mt-1 line-clamp-2">
+                      {activeChartInfo.rawTranscription}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div ref={formScrollRef} className="flex-1 overflow-y-auto relative scroll-smooth">
+              <StructuredNoteForm
+                note={structuredNote}
+                onChange={setStructuredNote}
+                disabled={false}
+                animatingField={null}
+              />
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* CDI Review Modal - Simple option selector */}
+        <CdiReviewModal
+          isOpen={showCdiModal}
+          onClose={() => setShowCdiModal(false)}
+          onSelectOption={handleCdiOptionSelect}
+        />
       </div>
     );
   }
@@ -449,12 +766,16 @@ export default function VoiceAssistantSplitView({
               </motion.span>
             )}
             <button 
+              onClick={() => setShowCdiModal(true)}
               disabled={isFormDisabled}
-              className={`px-5 py-2.5 bg-indigo-600 text-white rounded-2xl text-sm font-semibold 
-                shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:shadow-xl transition-all
+              className={`flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl text-sm font-semibold 
+                shadow-lg shadow-indigo-100 hover:shadow-xl transition-all
                 ${isFormDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              Finalize Note
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>CDI Review</span>
             </button>
           </div>
         </div>
@@ -821,6 +1142,13 @@ export default function VoiceAssistantSplitView({
           </div>
         </div>
       </div>
+
+      {/* CDI Review Modal - Simple option selector */}
+      <CdiReviewModal
+        isOpen={showCdiModal}
+        onClose={() => setShowCdiModal(false)}
+        onSelectOption={handleCdiOptionSelect}
+      />
     </div>
   );
 }

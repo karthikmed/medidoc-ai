@@ -19,6 +19,17 @@ interface SerializedChartInfo {
 }
 
 /**
+ * Serialized CDI chart info for client component
+ */
+interface SerializedCdiChartInfo extends SerializedChartInfo {
+  cdiStatus: string | null;
+  cdiReviewedAt: string | null;
+  cdiNotes: string | null;
+  assessment: string | null;
+  clinicalImpression: string | null;
+}
+
+/**
  * Appointment Detail Page
  * Fetches specific appointment and patient data from the database
  */
@@ -33,12 +44,13 @@ export default async function AppointmentDetailPage({
     return notFound();
   }
 
-  // Fetch appointment with patient and chart info from DB
+  // Fetch appointment with patient, chart info, and CDI chart info from DB
   const appointment = await prisma.appointment.findUnique({
     where: { appointmentId },
     include: {
       patient: true,
       chartInfo: true,
+      cdiChartInfo: true,
     },
   });
 
@@ -46,7 +58,7 @@ export default async function AppointmentDetailPage({
     return notFound();
   }
 
-  const { patient, chartInfo } = appointment;
+  const { patient, chartInfo, cdiChartInfo } = appointment;
 
   // Serialize chart info for client component
   const serializedChartInfo: SerializedChartInfo | null = chartInfo ? {
@@ -59,6 +71,24 @@ export default async function AppointmentDetailPage({
     vitalSigns: chartInfo.vitalSigns,
     diagnosis: chartInfo.diagnosis,
     plan: chartInfo.plan,
+  } : null;
+
+  // Serialize CDI chart info for client component
+  const serializedCdiChartInfo: SerializedCdiChartInfo | null = cdiChartInfo ? {
+    rawTranscription: cdiChartInfo.rawTranscription,
+    chiefComplient: cdiChartInfo.chiefComplient,
+    historyOfIllness: cdiChartInfo.historyOfIllness,
+    history: cdiChartInfo.history,
+    ros: cdiChartInfo.ros,
+    physicalExam: cdiChartInfo.physicalExam,
+    vitalSigns: cdiChartInfo.vitalSigns,
+    diagnosis: cdiChartInfo.diagnosis,
+    plan: cdiChartInfo.plan,
+    cdiStatus: cdiChartInfo.cdiStatus,
+    cdiReviewedAt: cdiChartInfo.cdiReviewedAt?.toISOString() || null,
+    cdiNotes: cdiChartInfo.cdiNotes,
+    assessment: cdiChartInfo.assessment,
+    clinicalImpression: cdiChartInfo.clinicalImpression,
   } : null;
 
   // Calculate age from DOB
@@ -120,6 +150,7 @@ export default async function AppointmentDetailPage({
         <VoiceAssistantSplitView 
           appointmentId={appointmentId}
           initialChartInfo={serializedChartInfo}
+          initialCdiChartInfo={serializedCdiChartInfo}
         />
       </div>
     </div>
