@@ -84,6 +84,7 @@ model Appointment {
   provider          Provider @relation(fields: [providerId], references: [providerId], onDelete: Cascade)
   appointmentType   AppointmentType @relation(fields: [appointmentTypeId], references: [appointmentTypeId], onDelete: Restrict)
   chartInfo         ChartInfo?
+  cdiChartInfo      CdiChartInfo?
 
   @@map("t_kb_appointment")
 }
@@ -151,6 +152,58 @@ model ChartInfo {
   appointment            Appointment @relation(fields: [appointmentId], references: [appointmentId], onDelete: Cascade)
 
   @@map("t_kb_chart_info")
+}
+
+// ===============================
+// 7️⃣ CDI Chart Info (CDI Compliant Clinical Data)
+// ===============================
+/// Stores CDI (Clinical Documentation Improvement) compliant clinical data.
+/// This table mirrors t_kb_chart_info structure but holds processed/validated CDI-ready data.
+/// Used for generating CDI-compliant PDF reports.
+model CdiChartInfo {
+  cdiChartInfoId         Int      @id @default(autoincrement()) @map("cdi_chart_info_id")
+  appointmentId          Int      @unique @map("appointment_id")
+
+  // Raw transcribed speech-to-text data (entire text in raw format)
+  rawTranscription       String?  @db.Text @map("raw_transcription")
+
+  // All 27 clinical fields as columns (from t_kb_field_definitions.field_key)
+  calculatedAge          String?  @db.Text @map("calculated_age")
+  patientGender          String?  @db.Text @map("patient_gender")
+  chiefComplient         String?  @db.Text @map("chief_complient")
+  historyOfIllness       String?  @db.Text @map("history_of_illness")
+  history                String?  @db.Text
+  ros                    String?  @db.Text
+  physicalExam           String?  @db.Text @map("physical_exam")
+  vitalSigns             String?  @db.Text @map("vital_signs")
+  assessment             String?  @db.Text
+  clinicalImpression     String?  @db.Text @map("clinical_impression")
+  diagnosis              String?  @db.Text
+  plan                   String?  @db.Text
+  planAndPrognosis       String?  @db.Text @map("plan_and_prognosis")
+  procedure              String?  @db.Text
+  descriptionOfProcedure String?  @db.Text @map("description_of_procedure")
+  operativeProcedure     String?  @db.Text @map("operative_procedure")
+  preOpDiagnosis         String?  @db.Text @map("pre_op_diagnosis")
+  postOpDiagnosis        String?  @db.Text @map("post_op_diagnosis")
+  postOfImpression       String?  @db.Text @map("post_of_impression")
+  postOpOrder            String?  @db.Text @map("post_op_order")
+  testAndOrders          String?  @db.Text @map("test_and_orders")
+  insuranceCategories    String?  @db.Text @map("insurance_categories")
+  insuranceCompanies     String?  @db.Text @map("insurance_companies")
+
+  // CDI-specific metadata
+  cdiStatus              String?  @db.VarChar(50) @map("cdi_status") // e.g., 'pending', 'reviewed', 'approved'
+  cdiReviewedBy          String?  @db.VarChar(255) @map("cdi_reviewed_by")
+  cdiReviewedAt          DateTime? @map("cdi_reviewed_at")
+  cdiNotes               String?  @db.Text @map("cdi_notes")
+
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  appointment            Appointment @relation(fields: [appointmentId], references: [appointmentId], onDelete: Cascade)
+
+  @@map("t_kb_cdi_chart_info")
 }
 
 // ===============================
