@@ -14,13 +14,7 @@ export default function DashboardLayout({
         </div>
         <nav className="flex-1 px-4 space-y-2">
           <Link href="/dashboard" className="block px-4 py-2 rounded-md bg-indigo-800 hover:bg-indigo-600 transition-colors">
-            Dashboard
-          </Link>
-          <Link href="/dashboard/appointments" className="block px-4 py-2 rounded-md hover:bg-indigo-600 transition-colors">
             Appointments
-          </Link>
-          <Link href="/dashboard/patients" className="block px-4 py-2 rounded-md hover:bg-indigo-600 transition-colors">
-            Patients
           </Link>
           <Link href="/dashboard/settings" className="block px-4 py-2 rounded-md hover:bg-indigo-600 transition-colors">
             Settings

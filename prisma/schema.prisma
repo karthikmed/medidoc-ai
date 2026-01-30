@@ -57,15 +57,12 @@ model Patient {
 /// Lookup table defining visit classifications. Consolidates type_of_visit, type_of_service, and place_of_service into a single normalized table
 model AppointmentType {
   appointmentTypeId Int      @id @default(autoincrement()) @map("appointment_type_id")
-  typeOfVisit       String   @db.VarChar(100) @map("type_of_visit")  // e.g., New, Established, ER
-  typeOfService     String   @db.VarChar(100) @map("type_of_service")  // e.g., Office Visit, Surgery
-  placeOfService    String   @db.VarChar(100) @map("place_of_service")  // e.g., Clinic, Hospital, Telehealth
+  appointmentType   String   @unique @db.VarChar(100) @map("appointment_type") // e.g., New, Established, ER, Office Visit
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   appointments      Appointment[]
 
-  @@unique([typeOfVisit, typeOfService, placeOfService])
   @@map("t_kb_appointment_type")
 }
 
