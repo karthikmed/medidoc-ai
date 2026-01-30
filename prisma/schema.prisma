@@ -10,13 +10,94 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Example model - can be expanded based on requirements
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ===============================
+// 1️⃣ Providers
+// ===============================
+model Provider {
+  providerId    Int      @id @default(autoincrement()) @map("provider_id")
+  providerName  String   @db.VarChar(255) @map("provider_name")
+  specialty     String?  @db.VarChar(255)
+  contactInfo   Json?    @map("contact_info")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  @@map("users")
+  appointments  Appointment[]
+
+  @@map("t_kb_provider")
+}
+
+// ===============================
+// 2️⃣ Patients
+// ===============================
+model Patient {
+  patientId     Int      @id @default(autoincrement()) @map("patient_id")
+  fullName      String   @db.VarChar(255) @map("full_name")
+  dateOfBirth   DateTime? @db.Date @map("date_of_birth")
+  gender        String?  @db.VarChar(10)
+  insurance     Json?    
+  contactInfo   Json?    @map("contact_info")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  appointments  Appointment[]
+
+  @@map("t_kb_patient")
+}
+
+// ===============================
+// 3️⃣ Appointments
+// ===============================
+model Appointment {
+  appointmentId         Int      @id @default(autoincrement()) @map("appointment_id")
+  patientId             Int      @map("patient_id")
+  providerId            Int      @map("provider_id")
+  appointmentDate       DateTime @map("appointment_date")
+  durationMin           Int?     @map("duration_min")
+  typeOfVisitId         Int?     @map("type_of_visit_id")
+  typeOfServiceId       Int?     @map("type_of_service_id")
+  placeOfServiceCodeId  Int?     @map("place_of_service_code_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  patient               Patient  @relation(fields: [patientId], references: [patientId])
+  provider              Provider @relation(fields: [providerId], references: [providerId])
+  chartInfo             ChartInfo[]
+
+  @@map("t_kb_appointment")
+}
+
+// ===============================
+// 4️⃣ Field Definitions (27 fields)
+// ===============================
+model FieldDefinition {
+  fieldId      Int      @id @default(autoincrement()) @map("field_id")
+  fieldKey     String   @unique @db.VarChar(100) @map("field_key")
+  displayName  String?  @db.VarChar(255) @map("display_name")
+  description  String?  @db.Text
+  dataType     String   @default("text") @db.VarChar(50) @map("data_type")
+  isRequired   Boolean  @default(false) @map("is_required")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  chartInfo    ChartInfo[]
+
+  @@map("t_kb_field_definitions")
+}
+
+// ===============================
+// 5️⃣ Chart Info (actual patient values per appointment)
+// ===============================
+model ChartInfo {
+  chartInfoId  Int      @id @default(autoincrement()) @map("chart_info_id")
+  appointmentId Int     @map("appointment_id")
+  fieldId      Int      @map("field_id")
+  value        String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  appointment  Appointment @relation(fields: [appointmentId], references: [appointmentId], onDelete: Cascade)
+  field        FieldDefinition @relation(fields: [fieldId], references: [fieldId], onDelete: Cascade)
+
+  @@unique([appointmentId, fieldId])
+  @@map("t_kb_chart_info")
 }
