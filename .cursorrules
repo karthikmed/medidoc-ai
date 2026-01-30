@@ -1,0 +1,158 @@
+# Comprehensive Coding Rules for Next.js + Prisma/Postgres
+# Enforce modular, reusable, clean, best-practice code
+
+# ============================================================================
+# FUNCTION RULES
+# ============================================================================
+max_function_lines = 25
+require_function_docstring = true
+function_naming = camelCase
+function_pure = true
+no_unused_parameters = true
+avoid_deep_nesting_in_functions = 3
+max_function_parameters = 5
+
+# ============================================================================
+# CLASS RULES
+# ============================================================================
+max_class_lines = 100
+require_class_docstring = true
+class_naming = PascalCase
+one_class_per_file = true
+max_methods_per_class = 10
+max_attributes_per_class = 10
+follow_single_responsibility_principle = true
+
+# ============================================================================
+# MODULE/FILE RULES
+# ============================================================================
+max_file_lines = 300
+module_naming = kebab-case
+explicit_imports_only = true
+no_global_variables = true
+file_should_have_single_responsibility = true
+prefer_named_exports = true
+
+# ============================================================================
+# NEXT.JS SPECIFIC RULES
+# ============================================================================
+# API Routes
+api_routes_should_validate_input = true
+api_routes_should_handle_errors = true
+api_routes_should_use_prisma_transactions = true
+api_routes_max_lines = 50
+
+# React Components
+component_naming = PascalCase
+component_files_should_match_component_name = true
+prefer_functional_components = true
+max_component_lines = 150
+components_should_be_small_and_focused = true
+avoid_prop_drilling = true
+use_custom_hooks_for_logic = true
+
+# Server Components / Server Actions
+server_actions_should_be_typed = true
+server_actions_should_validate_input = true
+prefer_server_components_when_possible = true
+
+# ============================================================================
+# PRISMA/DATABASE RULES
+# ============================================================================
+# Prisma Schema
+schema_models_should_have_documentation = true
+use_meaningful_relation_names = true
+prefer_explicit_foreign_keys = true
+avoid_cascading_deletes_unless_needed = true
+
+# Database Queries
+queries_should_use_indexes = true
+avoid_n_plus_one_queries = true
+use_transactions_for_multiple_operations = true
+queries_should_be_typed = true
+prefer_prisma_client_over_raw_sql = true
+handle_database_errors_explicitly = true
+
+# ============================================================================
+# CLEAN CODE RULES
+# ============================================================================
+consistent_indentation = 2
+max_line_length = 100
+no_deeply_nested_blocks = 3
+no_magic_numbers = true
+no_hardcoded_strings = true
+clear_variable_names = true
+consistent_brace_and_space_style = true
+no_redundant_code = true
+prefer_const_over_let = true
+use_destructuring_when_appropriate = true
+
+# ============================================================================
+# REUSABILITY RULES
+# ============================================================================
+encourage_helper_functions = true
+functions_should_be_generic = true
+classes_should_be_reusable = true
+avoid_duplicate_logic = true
+create_shared_utilities = true
+extract_common_patterns = true
+
+# ============================================================================
+# ERROR HANDLING RULES
+# ============================================================================
+always_handle_exceptions = true
+no_silent_failures = true
+use_specific_exceptions = true
+log_errors_when_possible = true
+provide_meaningful_error_messages = true
+use_error_boundaries_in_react = true
+
+# ============================================================================
+# TYPE SAFETY RULES
+# ============================================================================
+type_annotations_required = true
+prefer_typescript_over_javascript = true
+avoid_any_type = true
+use_strict_null_checks = true
+define_interfaces_for_shared_types = true
+
+# ============================================================================
+# TESTING & DOCUMENTATION RULES
+# ============================================================================
+encourage_unit_tests = true
+test_functions_naming = test_* or describe_*
+docstrings_for_all_public_api = true
+document_complex_logic = true
+test_api_routes = true
+test_database_operations = true
+
+# ============================================================================
+# CODE STRUCTURE & READABILITY RULES
+# ============================================================================
+logical_grouping_of_code = true
+separate_concerns_into_modules = true
+avoid_long_parameter_lists = 5
+prefer_composition_over_inheritance = true
+prefer_immutable_data_when_possible = true
+organize_imports_logically = true
+group_related_functions_together = true
+
+# ============================================================================
+# SECURITY RULES
+# ============================================================================
+validate_all_user_input = true
+sanitize_database_inputs = true
+use_parameterized_queries = true
+avoid_sql_injection = true
+protect_api_routes_with_authentication = true
+handle_sensitive_data_securely = true
+
+# ============================================================================
+# PERFORMANCE RULES
+# ============================================================================
+optimize_database_queries = true
+use_pagination_for_large_datasets = true
+implement_caching_where_appropriate = true
+avoid_unnecessary_re_renders = true
+use_react_memo_when_beneficial = true
+lazy_load_components_when_possible = true
