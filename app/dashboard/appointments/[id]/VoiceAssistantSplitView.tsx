@@ -2,33 +2,144 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { saveRawTranscription } from '@/app/actions/chart';
+import { saveTranscriptionAndStructuredNote } from '@/app/actions/chart';
+import StructuredNoteForm from './StructuredNoteForm';
+import { StructuredNote, emptyStructuredNote } from './types';
 
-interface VoiceAssistantSplitViewProps {
-  initialNotes: string;
-  appointmentId: number;
+/**
+ * Serialized chart info from database
+ */
+interface SerializedChartInfo {
+  rawTranscription: string | null;
+  chiefComplient: string | null;
+  historyOfIllness: string | null;
+  history: string | null;
+  ros: string | null;
+  physicalExam: string | null;
+  vitalSigns: string | null;
+  diagnosis: string | null;
+  plan: string | null;
 }
 
-type ViewState = 'idle' | 'recording' | 'review';
+interface VoiceAssistantSplitViewProps {
+  appointmentId: number;
+  initialChartInfo: SerializedChartInfo | null;
+}
 
-export default function VoiceAssistantSplitView({ initialNotes, appointmentId }: VoiceAssistantSplitViewProps) {
-  const [notes, setNotes] = useState(initialNotes);
+type ViewState = 'idle' | 'recording' | 'processing' | 'filling' | 'review';
+
+/** Field animation order for the magical auto-fill effect */
+const FIELD_ORDER = [
+  'chief_complaint',
+  'history_of_present_illness',
+  'history.past_medical_history',
+  'history.surgical_history',
+  'history.family_history',
+  'history.social_history',
+  'review_of_systems',
+  'physical_exam',
+  'vitals',
+  'diagnosis',
+  'plan',
+  'extra_info',
+];
+
+/**
+ * Parses existing chart data into StructuredNote format
+ */
+function parseChartInfoToStructuredNote(chartInfo: SerializedChartInfo): StructuredNote {
+  // Parse history text back to structured format
+  const historyText = chartInfo.history || '';
+  const parseHistoryField = (label: string): string => {
+    const regex = new RegExp(`${label}:\\s*([\\s\\S]*?)(?=(?:Past Medical History:|Surgical History:|Family History:|Social History:|$))`, 'i');
+    const match = historyText.match(regex);
+    return match ? match[1].trim() : '';
+  };
+
+  // Parse vitals text
+  const vitalsText = chartInfo.vitalSigns || '';
+  const parseVitalField = (label: string): string => {
+    const regex = new RegExp(`${label}:\\s*([^,]+)`, 'i');
+    const match = vitalsText.match(regex);
+    return match ? match[1].trim() : '-';
+  };
+
+  // Parse diagnosis text
+  const diagnosisText = chartInfo.diagnosis || '';
+  const diagnosisEntries = diagnosisText.split(/\d+\.\s+/).filter(Boolean);
+  const diagnoses = diagnosisEntries.map(entry => {
+    const [name, ...treatmentParts] = entry.split(/\n\s*Treatment:\s*/i);
+    return {
+      diagnosis_name: name.trim(),
+      treatment: treatmentParts.join(' ').trim(),
+    };
+  });
+
+  return {
+    chief_complaint: chartInfo.chiefComplient || '',
+    history_of_present_illness: chartInfo.historyOfIllness || '',
+    history: {
+      past_medical_history: parseHistoryField('Past Medical History'),
+      surgical_history: parseHistoryField('Surgical History'),
+      family_history: parseHistoryField('Family History'),
+      social_history: parseHistoryField('Social History'),
+    },
+    review_of_systems: chartInfo.ros || '',
+    physical_exam: chartInfo.physicalExam || '',
+    vitals: {
+      height: parseVitalField('Height'),
+      weight: parseVitalField('Weight'),
+      bmi: parseVitalField('BMI'),
+      bp: parseVitalField('Blood Pressure'),
+    },
+    diagnosis: diagnoses.length > 0 ? diagnoses : [{ diagnosis_name: '', treatment: '' }],
+    plan: chartInfo.plan || '',
+    extra_info: '',
+  };
+}
+
+/**
+ * Split view component for clinical documentation
+ * Shows only form if transcription exists, otherwise shows split view
+ */
+export default function VoiceAssistantSplitView({ 
+  appointmentId,
+  initialChartInfo
+}: VoiceAssistantSplitViewProps) {
+  // Determine if we have existing transcription
+  const hasExistingTranscription = Boolean(initialChartInfo?.rawTranscription);
+  
+  // Initialize structured note from existing data or empty
+  const initialNote = initialChartInfo && hasExistingTranscription
+    ? parseChartInfoToStructuredNote(initialChartInfo)
+    : emptyStructuredNote;
+
+  const [structuredNote, setStructuredNote] = useState<StructuredNote>(initialNote);
+  const [showVoicePanel, setShowVoicePanel] = useState(!hasExistingTranscription);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [editableTranscript, setEditableTranscript] = useState('');
   const [viewState, setViewState] = useState<ViewState>('idle');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [recognition, setRecognition] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [animatingField, setAnimatingField] = useState<string | null>(null);
+  const [fillingProgress, setFillingProgress] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const formScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || 
+      (window as any).webkitSpeechRecognition;
+    
     if (SpeechRecognition) {
       const rec = new SpeechRecognition();
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = 'en-US';
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rec.onresult = (event: any) => {
         let currentTranscript = '';
         for (let i = 0; i < event.results.length; i++) {
@@ -40,6 +151,7 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
         }
       };
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rec.onerror = (event: any) => {
         console.error('Speech recognition error', event.error);
         setIsListening(false);
@@ -76,28 +188,140 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
     setViewState('review');
   };
 
-  const handleSaveToDB = async () => {
+  /**
+   * Animate filling fields one by one with magical effect
+   */
+  const animateFieldFilling = async (data: StructuredNote) => {
+    setViewState('filling');
+    setFillingProgress(0);
+    
+    let currentNote = { ...emptyStructuredNote };
+    setStructuredNote(currentNote);
+
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
+    for (let i = 0; i < FIELD_ORDER.length; i++) {
+      const field = FIELD_ORDER[i];
+      setAnimatingField(field);
+      setFillingProgress(Math.round(((i + 1) / FIELD_ORDER.length) * 100));
+      
+      if (formScrollRef.current) {
+        const fieldElement = formScrollRef.current.querySelector(`[data-field="${field}"]`);
+        if (fieldElement) {
+          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+
+      await delay(150);
+      
+      if (field === 'chief_complaint') {
+        currentNote = { ...currentNote, chief_complaint: data.chief_complaint };
+      } else if (field === 'history_of_present_illness') {
+        currentNote = { ...currentNote, history_of_present_illness: data.history_of_present_illness };
+      } else if (field === 'history.past_medical_history') {
+        currentNote = { 
+          ...currentNote, 
+          history: { ...currentNote.history, past_medical_history: data.history.past_medical_history }
+        };
+      } else if (field === 'history.surgical_history') {
+        currentNote = { 
+          ...currentNote, 
+          history: { ...currentNote.history, surgical_history: data.history.surgical_history }
+        };
+      } else if (field === 'history.family_history') {
+        currentNote = { 
+          ...currentNote, 
+          history: { ...currentNote.history, family_history: data.history.family_history }
+        };
+      } else if (field === 'history.social_history') {
+        currentNote = { 
+          ...currentNote, 
+          history: { ...currentNote.history, social_history: data.history.social_history }
+        };
+      } else if (field === 'review_of_systems') {
+        currentNote = { ...currentNote, review_of_systems: data.review_of_systems };
+      } else if (field === 'physical_exam') {
+        currentNote = { ...currentNote, physical_exam: data.physical_exam };
+      } else if (field === 'vitals') {
+        currentNote = { ...currentNote, vitals: data.vitals };
+      } else if (field === 'diagnosis') {
+        currentNote = { ...currentNote, diagnosis: data.diagnosis };
+      } else if (field === 'plan') {
+        currentNote = { ...currentNote, plan: data.plan };
+      } else if (field === 'extra_info') {
+        currentNote = { ...currentNote, extra_info: data.extra_info || '' };
+      }
+      
+      setStructuredNote({ ...currentNote });
+      await delay(350);
+    }
+    
+    setAnimatingField(null);
+    await delay(500);
+  };
+
+  /**
+   * Process transcription with OpenAI and save to database
+   */
+  const handleProcessAndSave = async () => {
     if (!editableTranscript.trim()) return;
     
-    setSaveStatus('saving');
-    const result = await saveRawTranscription(appointmentId, editableTranscript);
+    setViewState('processing');
+    setProcessingStatus('Analyzing with AI...');
     
-    if (result.success) {
+    try {
+      const response = await fetch('/api/transcription/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcription: editableTranscript }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process transcription');
+      }
+
+      const result = await response.json();
+      
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Processing failed');
+      }
+
+      setProcessingStatus('Extracting clinical data...');
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      await animateFieldFilling(result.data);
+      
+      setProcessingStatus('Saving to database...');
+      
+      const saveResult = await saveTranscriptionAndStructuredNote(
+        appointmentId,
+        editableTranscript,
+        result.data
+      );
+
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Failed to save');
+      }
+
       setSaveStatus('success');
+      setProcessingStatus('Complete!');
+      
       setTimeout(() => {
-        setSaveStatus('idle');
         setViewState('idle');
         setTranscript('');
         setEditableTranscript('');
+        setSaveStatus('idle');
+        setProcessingStatus('');
+        setFillingProgress(0);
+        setShowVoicePanel(false); // Hide voice panel after successful save
       }, 2000);
-    } else {
-      setSaveStatus('error');
-    }
-  };
 
-  const handleAppendToNotes = () => {
-    if (!editableTranscript.trim()) return;
-    setNotes(prev => prev ? `${prev}\n\n${editableTranscript}` : editableTranscript);
+    } catch (error) {
+      console.error('Processing error:', error);
+      setSaveStatus('error');
+      setProcessingStatus('Error processing transcription');
+      setViewState('review');
+    }
   };
 
   const resetSession = () => {
@@ -105,45 +329,150 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
     setTranscript('');
     setEditableTranscript('');
     setSaveStatus('idle');
+    setProcessingStatus('');
+    setAnimatingField(null);
+    setFillingProgress(0);
   };
 
-  return (
-    <div className="flex h-full w-full overflow-hidden bg-white rounded-3xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.08)] border border-gray-100">
-      
-      {/* LEFT HALF: CLINICAL DOCUMENTATION */}
-      <div className="w-1/2 flex flex-col border-r border-gray-100 bg-gradient-to-br from-slate-50 to-white">
-        <div className="px-8 py-6 border-b border-gray-100/80 flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Clinical Documentation</h2>
-            <p className="text-sm text-gray-400 mt-0.5">Provider Notes & Observations</p>
+  const isFormDisabled = viewState === 'recording' || viewState === 'processing' || viewState === 'filling';
+
+  // Full width form when voice panel is hidden
+  if (!showVoicePanel) {
+    return (
+      <div className="flex h-full w-full overflow-hidden bg-white rounded-3xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.08)] border border-gray-100">
+        <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-white relative">
+          <div className="px-6 py-4 border-b border-gray-100/80 flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Clinical Documentation</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {initialChartInfo?.rawTranscription ? 'Transcription on file' : 'Structured Note Fields'}
+              </p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => setShowVoicePanel(true)}
+                className="flex items-center space-x-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-2xl text-sm font-semibold hover:bg-indigo-100 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 013 3v10a3 3 0 01-6 0V4a3 3 0 013-3z" />
+                </svg>
+                <span>New Recording</span>
+              </button>
+              <button 
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-2xl text-sm font-semibold 
+                  shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:shadow-xl transition-all"
+              >
+                Finalize Note
+              </button>
+            </div>
           </div>
-          <button className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:shadow-xl transition-all">
-            Finalize Note
-          </button>
-        </div>
-        
-        <div className="flex-1 relative">
-          <textarea
-            className="w-full h-full p-8 text-gray-700 placeholder-gray-300 focus:outline-none resize-none leading-relaxed text-[17px] bg-transparent"
-            placeholder="Start typing your clinical notes here..."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
           
-          <div className="absolute bottom-4 left-6 right-6 flex items-center justify-between text-xs text-gray-400 font-medium bg-white/90 backdrop-blur-sm px-4 py-2.5 rounded-xl border border-gray-100">
-            <span className="flex items-center">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-2" />
-              Auto-save enabled
-            </span>
-            <span>{notes.trim() === '' ? 0 : notes.trim().split(/\s+/).length} words</span>
+          {/* Show existing transcription preview */}
+          {initialChartInfo?.rawTranscription && (
+            <div className="mx-6 mt-4 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-blue-800">Original Transcription</p>
+                  <p className="text-xs text-blue-600 mt-1 line-clamp-2">
+                    {initialChartInfo.rawTranscription}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <div ref={formScrollRef} className="flex-1 overflow-y-auto relative scroll-smooth">
+            <StructuredNoteForm
+              note={structuredNote}
+              onChange={setStructuredNote}
+              disabled={false}
+              animatingField={null}
+            />
           </div>
         </div>
       </div>
+    );
+  }
 
-      {/* RIGHT HALF: VOICE AI AGENT (WHITE/BLUE THEME) */}
+  // Split view with voice panel
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-white rounded-3xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.08)] border border-gray-100">
+      
+      {/* LEFT HALF: STRUCTURED CLINICAL DOCUMENTATION */}
+      <div className="w-1/2 flex flex-col border-r border-gray-100 bg-gradient-to-br from-slate-50 to-white relative">
+        {/* Filling Progress Overlay */}
+        <AnimatePresence>
+          {viewState === 'filling' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-20 pointer-events-none"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gray-200">
+                <motion.div 
+                  className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"
+                  initial={{ width: '0%' }}
+                  animate={{ width: `${fillingProgress}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="px-6 py-4 border-b border-gray-100/80 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Clinical Documentation</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Structured Note Fields</p>
+          </div>
+          <div className="flex items-center space-x-3">
+            {viewState === 'filling' && (
+              <motion.span 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold"
+              >
+                <motion.span
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="mr-2"
+                >
+                  ✨
+                </motion.span>
+                AI Filling {fillingProgress}%
+              </motion.span>
+            )}
+            <button 
+              disabled={isFormDisabled}
+              className={`px-5 py-2.5 bg-indigo-600 text-white rounded-2xl text-sm font-semibold 
+                shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:shadow-xl transition-all
+                ${isFormDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Finalize Note
+            </button>
+          </div>
+        </div>
+        
+        <div ref={formScrollRef} className="flex-1 overflow-y-auto relative scroll-smooth">
+          <StructuredNoteForm
+            note={structuredNote}
+            onChange={setStructuredNote}
+            disabled={isFormDisabled}
+            animatingField={animatingField}
+          />
+        </div>
+      </div>
+
+      {/* RIGHT HALF: VOICE AI AGENT */}
       <div className="w-1/2 flex flex-col bg-gradient-to-br from-blue-50/40 via-white to-indigo-50/30 relative overflow-hidden">
         
-        {/* Subtle Background Decoration */}
+        {/* Background Decoration */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-br from-blue-100/40 to-indigo-100/30 rounded-full blur-3xl -mr-40 -mt-40" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-gradient-to-tr from-indigo-100/30 to-blue-50/20 rounded-full blur-3xl -ml-32 -mb-32" />
 
@@ -152,28 +481,38 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
           {/* Header */}
           <div className="px-8 py-5 border-b border-gray-100/80 flex justify-between items-center bg-white/60 backdrop-blur-sm">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200/50">
+              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200/50">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 013 3v10a3 3 0 01-6 0V4a3 3 0 013-3z" />
                 </svg>
               </div>
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Medidoc AI</h2>
-                <p className="text-xs text-gray-400 font-medium">Voice Transcription Agent</p>
+                <p className="text-xs text-gray-400 font-medium">Voice Transcription</p>
               </div>
             </div>
-            {viewState !== 'idle' && (
-              <button 
-                onClick={resetSession}
-                className="text-xs text-gray-400 hover:text-gray-600 font-medium transition-colors"
-              >
-                Reset
-              </button>
-            )}
+            <div className="flex items-center space-x-2">
+              {hasExistingTranscription && viewState === 'idle' && (
+                <button 
+                  onClick={() => setShowVoicePanel(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 font-medium transition-colors px-3 py-1.5 hover:bg-gray-100 rounded-xl"
+                >
+                  Close
+                </button>
+              )}
+              {viewState !== 'idle' && viewState !== 'processing' && viewState !== 'filling' && (
+                <button 
+                  onClick={resetSession}
+                  className="text-xs text-gray-400 hover:text-gray-600 font-medium transition-colors px-3 py-1.5 hover:bg-gray-100 rounded-xl"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* IDLE STATE: Show Call Button */}
           <AnimatePresence mode="wait">
+            {/* IDLE STATE */}
             {viewState === 'idle' && (
               <motion.div 
                 key="idle"
@@ -184,7 +523,9 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
               >
                 <div className="text-center mb-10">
                   <h3 className="text-2xl font-bold text-gray-800 mb-2">Ready to Transcribe</h3>
-                  <p className="text-gray-400 text-sm max-w-xs">Click the button below to start recording your clinical observations</p>
+                  <p className="text-gray-400 text-sm max-w-xs">
+                    Click the button below to start recording your clinical observations
+                  </p>
                 </div>
 
                 <button
@@ -195,8 +536,6 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                   <svg className="w-14 h-14 text-white relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 013 3v10a3 3 0 01-6 0V4a3 3 0 013-3z" />
                   </svg>
-                  
-                  {/* Pulse rings */}
                   <div className="absolute inset-0 rounded-full border-2 border-indigo-300 animate-ping opacity-20" />
                 </button>
 
@@ -204,7 +543,7 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
               </motion.div>
             )}
 
-            {/* RECORDING STATE: Show Live Transcription */}
+            {/* RECORDING STATE */}
             {viewState === 'recording' && (
               <motion.div 
                 key="recording"
@@ -213,15 +552,14 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                 exit={{ opacity: 0, y: -20 }}
                 className="flex-1 flex flex-col p-6"
               >
-                {/* Recording Indicator */}
                 <div className="flex items-center justify-center space-x-3 mb-6">
-                  <span className="flex items-center px-4 py-2 bg-red-50 border border-red-100 rounded-full">
+                  <span className="flex items-center px-4 py-2 bg-red-50 border border-red-100 rounded-2xl">
                     <span className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse" />
                     <span className="text-xs font-bold text-red-600 uppercase tracking-wide">Recording</span>
                   </span>
                 </div>
 
-                {/* Live Waveform Visualizer */}
+                {/* Live Waveform */}
                 <div className="flex items-center justify-center space-x-1 h-16 mb-6">
                   {[...Array(12)].map((_, i) => (
                     <motion.div
@@ -240,10 +578,10 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                   ))}
                 </div>
 
-                {/* Live Transcript Display */}
+                {/* Live Transcript */}
                 <div 
                   ref={scrollRef}
-                  className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-inner p-6 overflow-y-auto"
+                  className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-inner p-6 overflow-y-auto"
                 >
                   <p className={`text-lg leading-relaxed ${transcript ? 'text-gray-700' : 'text-gray-300 italic'}`}>
                     {transcript || "Listening for clinical observations..."}
@@ -257,7 +595,6 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                   )}
                 </div>
 
-                {/* Stop Button */}
                 <div className="mt-6 flex justify-center">
                   <button
                     onClick={stopRecording}
@@ -270,7 +607,121 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
               </motion.div>
             )}
 
-            {/* REVIEW STATE: Show Editable Transcript + Save Options */}
+            {/* PROCESSING STATE */}
+            {viewState === 'processing' && (
+              <motion.div 
+                key="processing"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex-1 flex flex-col items-center justify-center p-8"
+              >
+                <div className="w-24 h-24 mb-8 relative">
+                  <motion.div 
+                    className="absolute inset-0 rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    style={{ 
+                      background: 'conic-gradient(from 0deg, #6366f1, #a855f7, #ec4899, #6366f1)',
+                      maskImage: 'radial-gradient(transparent 60%, black 60%)',
+                      WebkitMaskImage: 'radial-gradient(transparent 60%, black 60%)'
+                    }}
+                  />
+                  <div className="absolute inset-3 rounded-full bg-white flex items-center justify-center">
+                    <motion.span
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="text-3xl"
+                    >
+                      🧠
+                    </motion.span>
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">Processing Transcription</h3>
+                <p className="text-gray-400 text-sm">{processingStatus}</p>
+                
+                <div className="flex space-x-1 mt-4">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-2 h-2 bg-indigo-500 rounded-full"
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {/* FILLING STATE */}
+            {viewState === 'filling' && (
+              <motion.div 
+                key="filling"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex-1 flex flex-col items-center justify-center p-8"
+              >
+                <motion.div 
+                  className="w-32 h-32 mb-8 relative"
+                  animate={{ rotate: [0, 5, -5, 0] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-3xl" />
+                  <div className="absolute inset-2 bg-white rounded-2xl flex items-center justify-center shadow-inner">
+                    <motion.span
+                      animate={{ 
+                        scale: [1, 1.1, 1],
+                        rotate: [0, 10, -10, 0]
+                      }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                      className="text-5xl"
+                    >
+                      ✨
+                    </motion.span>
+                  </div>
+                  
+                  {/* Floating sparkles */}
+                  {[...Array(6)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="absolute w-2 h-2 bg-yellow-400 rounded-full"
+                      initial={{ 
+                        x: 64, 
+                        y: 64,
+                        opacity: 0 
+                      }}
+                      animate={{
+                        x: [64, 64 + Math.cos(i * 60 * Math.PI / 180) * 60],
+                        y: [64, 64 + Math.sin(i * 60 * Math.PI / 180) * 60],
+                        opacity: [0, 1, 0],
+                        scale: [0.5, 1, 0.5]
+                      }}
+                      transition={{
+                        duration: 1.5,
+                        repeat: Infinity,
+                        delay: i * 0.2
+                      }}
+                    />
+                  ))}
+                </motion.div>
+                
+                <h3 className="text-xl font-bold text-gray-800 mb-2">AI Magic in Progress</h3>
+                <p className="text-gray-400 text-sm mb-4">Filling clinical documentation...</p>
+                
+                <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div 
+                    className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"
+                    initial={{ width: '0%' }}
+                    animate={{ width: `${fillingProgress}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
+                <p className="text-xs text-indigo-600 font-bold mt-2">{fillingProgress}% Complete</p>
+              </motion.div>
+            )}
+
+            {/* REVIEW STATE */}
             {viewState === 'review' && (
               <motion.div 
                 key="review"
@@ -279,22 +730,21 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                 exit={{ opacity: 0, y: -20 }}
                 className="flex-1 flex flex-col p-6"
               >
-                {/* Review Header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
-                    <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+                    <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center">
                       <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                       </svg>
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-gray-900">Transcription Complete</h3>
-                      <p className="text-xs text-gray-400">Review and edit before saving</p>
+                      <p className="text-xs text-gray-400">Review and edit before processing</p>
                     </div>
                   </div>
                   <button
                     onClick={startRecording}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center space-x-1"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center space-x-1 px-3 py-1.5 hover:bg-indigo-50 rounded-xl transition-all"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -306,37 +756,27 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                 {/* Editable Transcript */}
                 <div className="flex-1 relative">
                   <textarea
-                    className="w-full h-full bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-gray-700 text-lg leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 resize-none"
+                    className="w-full h-full bg-white rounded-3xl border border-gray-200 shadow-sm p-6 text-gray-700 text-lg leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 resize-none"
                     value={editableTranscript}
                     onChange={(e) => setEditableTranscript(e.target.value)}
                     placeholder="Your transcription will appear here..."
                   />
-                  <div className="absolute bottom-4 right-4 text-xs text-gray-400 font-medium bg-white px-2 py-1 rounded">
+                  <div className="absolute bottom-4 right-4 text-xs text-gray-400 font-medium bg-white px-3 py-1.5 rounded-xl border border-gray-100">
                     {editableTranscript.trim().split(/\s+/).filter(Boolean).length} words
                   </div>
                 </div>
 
                 {/* Action Buttons */}
-                <div className="mt-6 flex items-center justify-between">
+                <div className="mt-6 flex items-center justify-end">
                   <button
-                    onClick={handleAppendToNotes}
-                    className="flex items-center space-x-2 px-5 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                    </svg>
-                    <span>Copy to Notes</span>
-                  </button>
-
-                  <button
-                    onClick={handleSaveToDB}
+                    onClick={handleProcessAndSave}
                     disabled={saveStatus === 'saving' || !editableTranscript.trim()}
-                    className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-semibold transition-all shadow-lg ${
+                    className={`flex items-center space-x-2 px-6 py-3.5 rounded-2xl font-semibold transition-all shadow-lg ${
                       saveStatus === 'success'
                         ? 'bg-emerald-500 text-white shadow-emerald-200'
                         : saveStatus === 'error'
                         ? 'bg-red-500 text-white shadow-red-200'
-                        : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-indigo-200 hover:shadow-xl disabled:opacity-50'
+                        : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-indigo-200 hover:shadow-xl hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100'
                     }`}
                   >
                     {saveStatus === 'saving' ? (
@@ -345,28 +785,26 @@ export default function VoiceAssistantSplitView({ initialNotes, appointmentId }:
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
-                        <span>Saving...</span>
+                        <span>Processing...</span>
                       </>
                     ) : saveStatus === 'success' ? (
                       <>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                         </svg>
-                        <span>Saved!</span>
+                        <span>Done!</span>
                       </>
                     ) : saveStatus === 'error' ? (
                       <>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                         </svg>
-                        <span>Error</span>
+                        <span>Error - Try Again</span>
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                        </svg>
-                        <span>Save to Database</span>
+                        <span className="text-lg">✨</span>
+                        <span>Process with AI</span>
                       </>
                     )}
                   </button>

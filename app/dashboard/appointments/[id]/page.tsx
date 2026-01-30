@@ -4,10 +4,29 @@ import { notFound } from 'next/navigation';
 import VoiceAssistantSplitView from './VoiceAssistantSplitView';
 
 /**
+ * Serialized chart info for client component
+ */
+interface SerializedChartInfo {
+  rawTranscription: string | null;
+  chiefComplient: string | null;
+  historyOfIllness: string | null;
+  history: string | null;
+  ros: string | null;
+  physicalExam: string | null;
+  vitalSigns: string | null;
+  diagnosis: string | null;
+  plan: string | null;
+}
+
+/**
  * Appointment Detail Page
  * Fetches specific appointment and patient data from the database
  */
-export default async function AppointmentDetailPage({ params }: { params: { id: string } }) {
+export default async function AppointmentDetailPage({ 
+  params 
+}: { 
+  params: { id: string } 
+}) {
   const appointmentId = parseInt(params.id);
 
   if (isNaN(appointmentId)) {
@@ -29,6 +48,19 @@ export default async function AppointmentDetailPage({ params }: { params: { id: 
 
   const { patient, chartInfo } = appointment;
 
+  // Serialize chart info for client component
+  const serializedChartInfo: SerializedChartInfo | null = chartInfo ? {
+    rawTranscription: chartInfo.rawTranscription,
+    chiefComplient: chartInfo.chiefComplient,
+    historyOfIllness: chartInfo.historyOfIllness,
+    history: chartInfo.history,
+    ros: chartInfo.ros,
+    physicalExam: chartInfo.physicalExam,
+    vitalSigns: chartInfo.vitalSigns,
+    diagnosis: chartInfo.diagnosis,
+    plan: chartInfo.plan,
+  } : null;
+
   // Calculate age from DOB
   const calculateAge = (dob: Date | null) => {
     if (!dob) return 'N/A';
@@ -43,7 +75,10 @@ export default async function AppointmentDetailPage({ params }: { params: { id: 
       <div className="bg-white border-b border-gray-200 px-8 py-3 shadow-sm z-20">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-6">
-            <Link href="/dashboard" className="text-indigo-600 hover:text-indigo-800 text-sm font-bold flex items-center bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors">
+            <Link 
+              href="/dashboard" 
+              className="text-indigo-600 hover:text-indigo-800 text-sm font-bold flex items-center bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors"
+            >
               <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
@@ -59,7 +94,9 @@ export default async function AppointmentDetailPage({ params }: { params: { id: 
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Age / Gender</p>
-                <p className="text-sm font-bold text-gray-900">{calculateAge(patient.dateOfBirth)} • {patient.gender || 'N/A'}</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {calculateAge(patient.dateOfBirth)} • {patient.gender || 'N/A'}
+                </p>
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Last Visit</p>
@@ -81,8 +118,8 @@ export default async function AppointmentDetailPage({ params }: { params: { id: 
       {/* Main Content: Split View */}
       <div className="flex-1 p-6 overflow-hidden">
         <VoiceAssistantSplitView 
-          initialNotes={chartInfo?.historyOfIllness || ''} 
-          appointmentId={appointmentId} 
+          appointmentId={appointmentId}
+          initialChartInfo={serializedChartInfo}
         />
       </div>
     </div>
