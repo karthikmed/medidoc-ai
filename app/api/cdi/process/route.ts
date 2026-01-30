@@ -58,9 +58,20 @@ interface ChartData {
   clinicalImpression?: string | null;
 }
 
+/**
+ * Patient demographics for CDI processing (HIPAA compliant - no PII)
+ */
+interface PatientInfo {
+  age?: number | string;
+  gender?: string;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { chartData } = await request.json() as { chartData: ChartData };
+    const { chartData, patientInfo } = await request.json() as { 
+      chartData: ChartData;
+      patientInfo?: PatientInfo;
+    };
 
     if (!chartData) {
       return NextResponse.json(
@@ -75,6 +86,15 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Build patient demographics section for the prompt (HIPAA compliant - no PII)
+    const patientDemographics = patientInfo ? `
+## Patient Demographics:
+- Age: ${patientInfo.age || 'Unknown'}
+- Gender: ${patientInfo.gender || 'Unknown'}
+
+Use this patient demographic information to properly reference the patient in all documentation fields. Refer to the patient as "the patient" or "a ${patientInfo.age}-year-old ${patientInfo.gender} patient". Do NOT use placeholders like "[NEEDS CLARIFICATION: age and gender]" - use the actual demographics provided above.
+` : '';
 
     const inputData = {
       chief_complaint: chartData.chiefComplient || '',
@@ -96,7 +116,7 @@ export async function POST(request: NextRequest) {
         { 
           role: 'user', 
           content: `Please review and enhance the following clinical documentation to be CDI-compliant. Return the improved version in JSON format with the same field names.
-
+${patientDemographics}
 Current Clinical Documentation:
 ${JSON.stringify(inputData, null, 2)}
 

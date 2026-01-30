@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPatientWithAppointment } from '@/app/actions/patient';
@@ -23,12 +23,72 @@ interface NewPatientFormProps {
 
 type Step = 'patient' | 'appointment' | 'processing' | 'complete';
 
+/** Month names for the date picker */
+const MONTHS = [
+  { value: 1, label: 'January' },
+  { value: 2, label: 'February' },
+  { value: 3, label: 'March' },
+  { value: 4, label: 'April' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'June' },
+  { value: 7, label: 'July' },
+  { value: 8, label: 'August' },
+  { value: 9, label: 'September' },
+  { value: 10, label: 'October' },
+  { value: 11, label: 'November' },
+  { value: 12, label: 'December' },
+];
+
+/** Generate array of years from current year back to 120 years ago */
+function generateYears(): number[] {
+  const currentYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let year = currentYear; year >= currentYear - 120; year--) {
+    years.push(year);
+  }
+  return years;
+}
+
+/** Get number of days in a given month/year */
+function getDaysInMonth(month: number, year: number): number {
+  if (!month || !year) return 31;
+  return new Date(year, month, 0).getDate();
+}
+
 export default function NewPatientForm({ providers, appointmentTypes }: NewPatientFormProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('patient');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [createdAppointmentId, setCreatedAppointmentId] = useState<number | null>(null);
+
+  // Date of birth separate state
+  const [dobMonth, setDobMonth] = useState<number>(0);
+  const [dobDay, setDobDay] = useState<number>(0);
+  const [dobYear, setDobYear] = useState<number>(0);
+
+  // Generate years list
+  const years = useMemo(() => generateYears(), []);
+
+  // Calculate days based on selected month and year
+  const daysInMonth = useMemo(() => {
+    return getDaysInMonth(dobMonth, dobYear || new Date().getFullYear());
+  }, [dobMonth, dobYear]);
+
+  // Generate days array
+  const days = useMemo(() => {
+    return Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  }, [daysInMonth]);
+
+  // Format date of birth as ISO string for storage
+  const formattedDateOfBirth = useMemo(() => {
+    if (dobYear && dobMonth && dobDay) {
+      const month = dobMonth.toString().padStart(2, '0');
+      const day = dobDay.toString().padStart(2, '0');
+      return `${dobYear}-${month}-${day}`;
+    }
+    return '';
+  }, [dobYear, dobMonth, dobDay]);
 
   // Patient form state
   const [patientData, setPatientData] = useState({
@@ -42,6 +102,11 @@ export default function NewPatientForm({ providers, appointmentTypes }: NewPatie
     insurancePolicyNumber: '',
   });
 
+  // Update dateOfBirth when DOB components change
+  const updatePatientDOB = () => {
+    setPatientData(prev => ({ ...prev, dateOfBirth: formattedDateOfBirth }));
+  };
+
   // Appointment form state
   const [appointmentData, setAppointmentData] = useState({
     providerId: providers[0]?.providerId || 0,
@@ -51,6 +116,16 @@ export default function NewPatientForm({ providers, appointmentTypes }: NewPatie
 
   const handlePatientChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setPatientData({ ...patientData, [e.target.name]: e.target.value });
+  };
+
+  // Handle DOB month change
+  const handleDobMonthChange = (value: number) => {
+    setDobMonth(value);
+    // Reset day if it exceeds the new month's days
+    const newDaysInMonth = getDaysInMonth(value, dobYear || new Date().getFullYear());
+    if (dobDay > newDaysInMonth) {
+      setDobDay(newDaysInMonth);
+    }
   };
 
   const handleAppointmentChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -63,6 +138,8 @@ export default function NewPatientForm({ providers, appointmentTypes }: NewPatie
       setError('Patient name is required');
       return;
     }
+    // Update DOB before proceeding
+    setPatientData(prev => ({ ...prev, dateOfBirth: formattedDateOfBirth }));
     setError('');
     setStep('appointment');
   };
@@ -162,15 +239,70 @@ export default function NewPatientForm({ providers, appointmentTypes }: NewPatie
                   />
                 </div>
 
-                <div>
+                <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Date of Birth</label>
-                  <input
-                    type="date"
-                    name="dateOfBirth"
-                    value={patientData.dateOfBirth}
-                    onChange={handlePatientChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                  />
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Month Selector */}
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Month</label>
+                      <select
+                        value={dobMonth}
+                        onChange={(e) => handleDobMonthChange(parseInt(e.target.value))}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white"
+                      >
+                        <option value={0}>Select month</option>
+                        {MONTHS.map((month) => (
+                          <option key={month.value} value={month.value}>
+                            {month.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Day Selector */}
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Day</label>
+                      <select
+                        value={dobDay}
+                        onChange={(e) => setDobDay(parseInt(e.target.value))}
+                        disabled={!dobMonth}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white disabled:bg-gray-50 disabled:cursor-not-allowed"
+                      >
+                        <option value={0}>Select day</option>
+                        {days.map((day) => (
+                          <option key={day} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Year Selector */}
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Year</label>
+                      <select
+                        value={dobYear}
+                        onChange={(e) => setDobYear(parseInt(e.target.value))}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white"
+                      >
+                        <option value={0}>Select year</option>
+                        {years.map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {/* Show formatted date preview */}
+                  {formattedDateOfBirth && (
+                    <p className="text-xs text-indigo-600 mt-2 flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Selected: {MONTHS.find(m => m.value === dobMonth)?.label} {dobDay}, {dobYear}
+                    </p>
+                  )}
                 </div>
 
                 <div>

@@ -151,6 +151,10 @@ export default async function AppointmentDetailPage({
           appointmentId={appointmentId}
           initialChartInfo={serializedChartInfo}
           initialCdiChartInfo={serializedCdiChartInfo}
+          patientInfo={{
+            age: calculateAge(patient.dateOfBirth),
+            gender: patient.gender || 'Unknown',
+          }}
         />
       </div>
     </div>

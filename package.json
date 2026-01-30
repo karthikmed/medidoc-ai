@@ -16,6 +16,7 @@
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.33.0",
     "@prisma/client": "^5.19.0",
+    "@react-pdf/renderer": "^4.3.2",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "framer-motion": "^12.29.2",

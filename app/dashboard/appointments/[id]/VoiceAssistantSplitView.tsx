@@ -35,10 +35,19 @@ interface SerializedCdiChartInfo extends SerializedChartInfo {
   clinicalImpression: string | null;
 }
 
+/**
+ * Patient demographic info for CDI processing (HIPAA compliant - no PII)
+ */
+interface PatientInfo {
+  age: number | string;
+  gender: string;
+}
+
 interface VoiceAssistantSplitViewProps {
   appointmentId: number;
   initialChartInfo: SerializedChartInfo | null;
   initialCdiChartInfo: SerializedCdiChartInfo | null;
+  patientInfo: PatientInfo;
 }
 
 type ViewState = 'idle' | 'recording' | 'processing' | 'filling' | 'review';
@@ -136,7 +145,8 @@ function parseChartInfoToStructuredNote(chartInfo: SerializedChartInfo): Structu
 export default function VoiceAssistantSplitView({ 
   appointmentId,
   initialChartInfo,
-  initialCdiChartInfo
+  initialCdiChartInfo,
+  patientInfo
 }: VoiceAssistantSplitViewProps) {
   // Determine if we have CDI data (prioritize CDI over regular chart info)
   const hasCdiData = Boolean(initialCdiChartInfo);
@@ -173,15 +183,22 @@ export default function VoiceAssistantSplitView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
 
-  // Format CDI review date for display
+  // Format CDI review date for display (using manual formatting for hydration consistency)
+  const formatCdiDate = (isoString: string): string => {
+    const date = new Date(isoString);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    const hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return `${month} ${day}, ${year} at ${hour12.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+  };
+
   const cdiReviewedDate = initialCdiChartInfo?.cdiReviewedAt 
-    ? new Date(initialCdiChartInfo.cdiReviewedAt).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
+    ? formatCdiDate(initialCdiChartInfo.cdiReviewedAt)
     : null;
 
   // Prepare chart data for CDI review (use original chart info, not CDI)
@@ -206,7 +223,10 @@ export default function VoiceAssistantSplitView({
         const response = await fetch('/api/cdi/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chartData: chartDataForCdi }),
+          body: JSON.stringify({ 
+            chartData: chartDataForCdi,
+            patientInfo: patientInfo,
+          }),
         });
 
         if (!response.ok) {
@@ -630,6 +650,19 @@ export default function VoiceAssistantSplitView({
                   </svg>
                   <span>New Recording</span>
                 </button>
+                {hasCdiData && (
+                  <a
+                    href={`/api/cdi/pdf?appointmentId=${appointmentId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-2xl text-sm font-semibold shadow-lg shadow-blue-100 hover:shadow-xl transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    <span>View PDF Report</span>
+                  </a>
+                )}
                 <button 
                   onClick={() => setShowCdiModal(true)}
                   className={`flex items-center space-x-2 px-5 py-2.5 rounded-2xl text-sm font-semibold shadow-lg transition-all ${
