@@ -47,6 +47,8 @@ model Patient {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   appointments  Appointment[]
+  chartInfos    ChartInfo[]
+  cdiChartInfos CdiChartInfo[]
 
   @@map("t_kb_patient")
 }
@@ -115,11 +117,10 @@ model FieldDefinition {
 model ChartInfo {
   chartInfoId            Int      @id @default(autoincrement()) @map("chart_info_id")
   appointmentId          Int      @unique @map("appointment_id")
+  patientId              Int?     @map("patient_id")
 
-    
   // Raw transcribed speech-to-text data (entire text in raw format)
   rawTranscription       String?  @db.Text @map("raw_transcription")
-  
   
   // All 27 clinical fields as columns (from t_kb_field_definitions.field_key)
   calculatedAge          String?  @db.Text @map("calculated_age")
@@ -150,6 +151,7 @@ model ChartInfo {
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   appointment            Appointment @relation(fields: [appointmentId], references: [appointmentId], onDelete: Cascade)
+  patient                Patient? @relation(fields: [patientId], references: [patientId], onDelete: Cascade)
 
   @@map("t_kb_chart_info")
 }
@@ -163,6 +165,7 @@ model ChartInfo {
 model CdiChartInfo {
   cdiChartInfoId         Int      @id @default(autoincrement()) @map("cdi_chart_info_id")
   appointmentId          Int      @unique @map("appointment_id")
+  patientId              Int?     @map("patient_id")
 
   // Raw transcribed speech-to-text data (entire text in raw format)
   rawTranscription       String?  @db.Text @map("raw_transcription")
@@ -202,6 +205,7 @@ model CdiChartInfo {
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   appointment            Appointment @relation(fields: [appointmentId], references: [appointmentId], onDelete: Cascade)
+  patient                Patient? @relation(fields: [patientId], references: [patientId], onDelete: Cascade)
 
   @@map("t_kb_cdi_chart_info")
 }

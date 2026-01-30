@@ -33,6 +33,17 @@ interface StructuredNoteData {
 }
 
 /**
+ * Helper to get patientId from appointment
+ */
+async function getPatientIdFromAppointment(appointmentId: number): Promise<number | null> {
+  const appointment = await prisma.appointment.findUnique({
+    where: { appointmentId },
+    select: { patientId: true },
+  });
+  return appointment?.patientId ?? null;
+}
+
+/**
  * Saves raw transcription for a specific appointment
  */
 export async function saveRawTranscription(
@@ -40,11 +51,14 @@ export async function saveRawTranscription(
   text: string
 ) {
   try {
+    const patientId = await getPatientIdFromAppointment(appointmentId);
+    
     await prisma.chartInfo.upsert({
       where: { appointmentId },
       update: { rawTranscription: text },
       create: { 
-        appointmentId, 
+        appointmentId,
+        patientId,
         rawTranscription: text 
       },
     });
@@ -101,6 +115,8 @@ export async function saveStructuredNote(
       })
       .join('\n\n');
 
+    const patientId = await getPatientIdFromAppointment(appointmentId);
+
     await prisma.chartInfo.upsert({
       where: { appointmentId },
       update: {
@@ -115,6 +131,7 @@ export async function saveStructuredNote(
       },
       create: {
         appointmentId,
+        patientId,
         chiefComplient: noteData.chief_complaint || null,
         historyOfIllness: noteData.history_of_present_illness || null,
         history: historyText || null,
@@ -179,6 +196,8 @@ export async function saveTranscriptionAndStructuredNote(
       })
       .join('\n\n');
 
+    const patientId = await getPatientIdFromAppointment(appointmentId);
+
     await prisma.chartInfo.upsert({
       where: { appointmentId },
       update: {
@@ -194,6 +213,7 @@ export async function saveTranscriptionAndStructuredNote(
       },
       create: {
         appointmentId,
+        patientId,
         rawTranscription,
         chiefComplient: noteData.chief_complaint || null,
         historyOfIllness: noteData.history_of_present_illness || null,
