@@ -56,19 +56,6 @@ CREATE TABLE IF NOT EXISTS t_kb_field_definitions (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- ===============================
--- 5️⃣ Chart Info (actual patient values per appointment)
--- ===============================
-CREATE TABLE IF NOT EXISTS t_kb_chart_info (
-    chart_info_id SERIAL PRIMARY KEY,
-    appointment_id INT REFERENCES t_kb_appointment(appointment_id) ON DELETE CASCADE,
-    field_id INT REFERENCES t_kb_field_definitions(field_id) ON DELETE CASCADE,
-    value TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(appointment_id, field_id)
-);
-
 -- Insert all 27 fields
 INSERT INTO t_kb_field_definitions (field_key, display_name, description)
 VALUES
@@ -100,3 +87,43 @@ VALUES
 ('test_and_orders', 'Test and Orders', ''),
 ('history_of_illness', 'History of Present Illness', '')
 ON CONFLICT (field_key) DO NOTHING;
+
+-- ===============================
+-- 5️⃣ Chart Info (all 27 fields as columns)
+-- ===============================
+CREATE TABLE IF NOT EXISTS t_kb_chart_info (
+    chart_info_id SERIAL PRIMARY KEY,
+    appointment_id INT UNIQUE REFERENCES t_kb_appointment(appointment_id) ON DELETE CASCADE,
+    
+    -- All 27 fields as columns
+    calculated_age TEXT,
+    patient_gender TEXT,
+    assessment TEXT,
+    chief_complient TEXT,
+    description_of_procedure TEXT,
+    diagnosis TEXT,
+    history TEXT,
+    insurance_categories TEXT,
+    insurance_companies TEXT,
+    operative_procedure TEXT,
+    physical_exam TEXT,
+    place_of_service_code_id TEXT,
+    plan TEXT,
+    plan_and_prognosis TEXT,
+    post_of_impression TEXT,
+    post_op_diagnosis TEXT,
+    pre_op_diagnosis TEXT,
+    time_duration_min TEXT,
+    type_of_service_id TEXT,
+    type_of_visit_id TEXT,
+    post_op_order TEXT,
+    clinical_impression TEXT,
+    ros TEXT,
+    procedure TEXT,
+    vital_signs TEXT,
+    test_and_orders TEXT,
+    history_of_illness TEXT,
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
