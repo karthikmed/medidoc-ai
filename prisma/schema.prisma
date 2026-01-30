@@ -114,6 +114,11 @@ model FieldDefinition {
 model ChartInfo {
   chartInfoId            Int      @id @default(autoincrement()) @map("chart_info_id")
   appointmentId          Int      @unique @map("appointment_id")
+
+    
+  // Raw transcribed speech-to-text data (entire text in raw format)
+  rawTranscription       String?  @db.Text @map("raw_transcription")
+  
   
   // All 27 clinical fields as columns (from t_kb_field_definitions.field_key)
   calculatedAge          String?  @db.Text @map("calculated_age")
