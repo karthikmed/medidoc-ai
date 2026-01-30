@@ -131,26 +131,19 @@ echo ""
 # Step 6: Create .env file
 echo -e "${YELLOW}Step 6: Creating .env file...${NC}"
 ENV_FILE=".env"
-DATABASE_URL='postgresql://postgres:postgres123@localhost:5432/medidoc_ai?schema=public'
+ENV_TEMPLATE="env.template"
 
-if [ -f "$ENV_FILE" ]; then
-    if grep -q "DATABASE_URL" "$ENV_FILE"; then
-        # Update existing DATABASE_URL
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            # macOS
-            sed -i '' "s|DATABASE_URL=.*|DATABASE_URL=\"$DATABASE_URL\"|" "$ENV_FILE"
-        else
-            # Linux
-            sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$DATABASE_URL\"|" "$ENV_FILE"
-        fi
-        echo -e "${GREEN}✅ Updated DATABASE_URL in .env${NC}"
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$ENV_TEMPLATE" ]; then
+        cp "$ENV_TEMPLATE" "$ENV_FILE"
+        echo -e "${GREEN}✅ Created .env from template${NC}"
+        echo -e "${YELLOW}   Note: For clients, edit .env and replace localhost with server IP${NC}"
     else
-        echo "DATABASE_URL=\"$DATABASE_URL\"" >> "$ENV_FILE"
-        echo -e "${GREEN}✅ Added DATABASE_URL to .env${NC}"
+        echo "DATABASE_URL=\"postgresql://postgres:postgres123@localhost:5432/medidoc_ai?schema=public\"" > "$ENV_FILE"
+        echo -e "${GREEN}✅ Created .env file${NC}"
     fi
 else
-    echo "DATABASE_URL=\"$DATABASE_URL\"" > "$ENV_FILE"
-    echo -e "${GREEN}✅ Created .env file${NC}"
+    echo -e "${GREEN}✅ .env file already exists${NC}"
 fi
 
 echo ""

@@ -17,22 +17,31 @@ Medical Documentation Assistant built with Next.js, PostgreSQL, and Prisma.
 - **Node.js 18+** - [Download](https://nodejs.org/)
 - **Docker Desktop** - [Download](https://www.docker.com/products/docker-desktop)
 
-### One-Command Setup
+### For Hackathon (Shared Database)
+
+**Server (one person):**
+```bash
+./setup.sh
+npm run dev
+# Share your IP address with team
+```
+
+**Clients (everyone else):**
+```bash
+cp env.template .env
+# Edit .env: Replace localhost with server's IP
+npm install
+npm run db:generate
+npm run dev
+# Access: http://SERVER_IP:3000
+```
+
+📖 **See [HACKATHON_SETUP.md](./HACKATHON_SETUP.md) for detailed steps**
+
+### Local Development (Standalone)
 
 ```bash
 ./setup.sh
-```
-
-That's it! The script will:
-- ✅ Check prerequisites
-- ✅ Install dependencies
-- ✅ Start PostgreSQL database
-- ✅ Create database schema
-- ✅ Set up environment variables
-
-### Start Development Server
-
-```bash
 npm run dev
 ```
 
